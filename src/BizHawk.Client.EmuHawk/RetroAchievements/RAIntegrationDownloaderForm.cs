@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -30,12 +32,13 @@ namespace BizHawk.Client.EmuHawk
 		private bool _exiting = false;
 		private bool _succeeded = false;
 		private bool _failed = false;
-		private Thread _thread;
+
+		private Thread/*?*/ _thread = null;
 
 		public bool DownloadSucceeded()
 		{
 			// block until the thread dies
-			while (_thread?.IsAlive ?? false)
+			while (_thread is { IsAlive: true })
 			{
 				Thread.Sleep(1);
 			}
@@ -57,23 +60,15 @@ namespace BizHawk.Client.EmuHawk
 			{
 				using (var evt = new ManualResetEvent(false))
 				{
-					using var client = new System.Net.WebClient();
-					System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
+					using var client = new WebClient();
+					ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 					client.DownloadFileAsync(new Uri(_url), fn);
-					client.DownloadProgressChanged += (object sender, System.Net.DownloadProgressChangedEventArgs e) =>
-					{
-						_pct = e.ProgressPercentage;
-					};
-					client.DownloadFileCompleted += (object sender, System.ComponentModel.AsyncCompletedEventArgs e) =>
-					{
-							//we don't really need a status. we'll just try to unzip it when it's done
-						evt.Set();
-					};
+					client.DownloadProgressChanged += (_, progressArgs) => _pct = progressArgs.ProgressPercentage;
+					client.DownloadFileCompleted += (_, _) => evt.Set(); // we don't really need a status, we'll just try to unzip it when it's done
 
-					for (; ; )
+					while (true)
 					{
-						if (evt.WaitOne(10))
-							break;
+						if (evt.WaitOne(10)) break;
 
 						//if the gui thread ordered an exit, cancel the download and wait for it to acknowledge
 						if (_exiting)
@@ -85,11 +80,10 @@ namespace BizHawk.Client.EmuHawk
 					}
 				}
 
-				//throw new Exception("test of download failure");
+//				throw new Exception("test of download failure");
 
 				//if we were ordered to exit, bail without wasting any more time
-				if (_exiting)
-					return;
+				if (_exiting) return;
 
 				//try acquiring file
 				using (var dll = new HawkFile(fn))
@@ -97,8 +91,7 @@ namespace BizHawk.Client.EmuHawk
 					var data = dll!.ReadAllBytes();
 
 					//last chance. exiting, don't dump the new RAIntegration file
-					if (_exiting)
-						return;
+					if (_exiting) return;
 
 					DirectoryInfo parentDir = new(Path.GetDirectoryName(_path)!);
 					if (!parentDir.Exists) parentDir.Create();
@@ -114,8 +107,14 @@ namespace BizHawk.Client.EmuHawk
 			}
 			finally
 			{
-				try { File.Delete(fn); }
-				catch { }
+				try
+				{
+					File.Delete(fn);
+				}
+				catch
+				{
+					// ignore
+				}
 			}
 		}
 
@@ -145,8 +144,7 @@ namespace BizHawk.Client.EmuHawk
 		private void timer1_Tick(object sender, EventArgs e)
 		{
 			//if it's done, close the window. the user will be smart enough to reopen it
-			if (_succeeded)
-				Close();
+			if (_succeeded) Close();
 			if (_failed)
 			{
 				_failed = false;
@@ -159,8 +157,7 @@ namespace BizHawk.Client.EmuHawk
 
 		private void linkLabel1_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
 		{
-			System.Diagnostics.Process.Start(_url);
+			Process.Start(_url);
 		}
 	}
 }
-
