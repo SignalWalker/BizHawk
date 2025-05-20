@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
-using BizHawk.Common;
+using Windows.Win32;
 
 using static BizHawk.Common.Shell32Imports;
 
@@ -39,7 +39,7 @@ namespace BizHawk.Client.EmuHawk
 					var str = Marshal.StringToHGlobalUni(SelectedPath);
 					try
 					{
-						WmImports.SendMessageW(hwnd, BFFM_SETSELECTIONW, new(1), str);
+						WmImports.SendMessageW(new(hwnd), BFFM_SETSELECTIONW, new(1), str);
 					}
 					finally
 					{

@@ -7,8 +7,13 @@ using System.Runtime.InteropServices;
 using BizHawk.Common;
 using BizHawk.Common.CollectionExtensions;
 
+using Windows.Win32;
+using Windows.Win32.Foundation;
+using Windows.Win32.UI.WindowsAndMessaging;
+
 using static BizHawk.Common.RawInputImports;
-using static BizHawk.Common.WmImports;
+using static BizHawk.Common.WmImports1;
+using static Windows.Win32.Win32Imports;
 
 namespace BizHawk.Bizware.Input
 {
@@ -16,12 +21,12 @@ namespace BizHawk.Bizware.Input
 	/// Note: Only 1 window per device class (e.g. keyboards) is actually allowed to use RAWINPUT (last one to call RegisterRawInputDevices)
 	/// So only one instance can actually be used at the same time
 	/// </summary>
-	internal sealed class RawKeyMouseInput : IKeyMouseInput
+	internal sealed unsafe class RawKeyMouseInput : IKeyMouseInput
 	{
 		private const int WM_CLOSE = 0x0010;
 		private const int WM_INPUT = 0x00FF;
 
-		private IntPtr RawInputWindow;
+		private HWND RawInputWindow;
 		private bool _handleAltKbLayouts;
 		private List<KeyEvent> _keyEvents = [ ];
 		private (int X, int Y) _mouseDelta;
@@ -33,17 +38,19 @@ namespace BizHawk.Bizware.Input
 		private int RawInputBufferSize;
 		private readonly int RawInputBufferDataOffset;
 
-		private static readonly WNDPROC _wndProc = WndProc;
-
-		private static readonly Lazy<IntPtr> _rawInputWindowAtom = new(() =>
+		private static unsafe readonly Lazy<PCWSTR> _rawInputWindowAtom = new(() =>
 		{
-			var wc = default(WNDCLASSW);
-			wc.lpfnWndProc = _wndProc;
-			wc.hInstance = LoaderApiImports.GetModuleHandleW(null);
-			wc.lpszClassName = "RawKeyMouseInputClass";
-
-			var atom = RegisterClassW(ref wc);
-			if (atom == IntPtr.Zero)
+			WNDCLASSW wc = default;
+			wc.lpfnWndProc = WndProc;
+			wc.hInstance = GetModuleHandleW(default(PCWSTR));
+			var lpszClassNameStr = "RawKeyMouseInputClass";
+			PCWSTR atom;
+			fixed (char* lpszClassName = lpszClassNameStr)
+			{
+				wc.lpszClassName = lpszClassName;
+				atom = MAKEINTATOM(RegisterClassW(in wc));
+			}
+			if (atom.Value is null)
 			{
 				throw new InvalidOperationException("Failed to register RAWINPUT window class");
 			}
@@ -51,9 +58,9 @@ namespace BizHawk.Bizware.Input
 			return atom;
 		});
 
-		private static unsafe IntPtr WndProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam)
+		private static LRESULT WndProc(HWND hWnd, uint uMsg, WPARAM wParam, LPARAM lParam)
 		{
-			var ud = GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+			var ud = GetWindowLongPtrW(hWnd, WINDOW_LONG_PTR_INDEX.GWLP_USERDATA);
 			if (ud == IntPtr.Zero)
 			{
 				return DefWindowProcW(hWnd, uMsg, wParam, lParam);
@@ -65,7 +72,7 @@ namespace BizHawk.Bizware.Input
 			{
 				if (uMsg == WM_CLOSE)
 				{
-					SetWindowLongPtrW(hWnd, GWLP_USERDATA, IntPtr.Zero);
+					SetWindowLongPtrW(hWnd, WINDOW_LONG_PTR_INDEX.GWLP_USERDATA, IntPtr.Zero);
 					handle = GCHandle.FromIntPtr(ud);
 					rawKeyMouseInput = (RawKeyMouseInput)handle.Target;
 					Marshal.FreeCoTaskMem(rawKeyMouseInput.RawInputBuffer);
@@ -157,7 +164,7 @@ namespace BizHawk.Bizware.Input
 				}
 			}
 
-			return IntPtr.Zero;
+			return default;
 		}
 
 		private unsafe void AddKeyInput(RAWKEYBOARD* keyboard)
@@ -203,24 +210,27 @@ namespace BizHawk.Bizware.Input
 			}
 		}
 
-		private static IntPtr CreateRawInputWindow()
+		private static unsafe HWND CreateRawInputWindow()
 		{
-			const int WS_CHILD = 0x40000000;
-			var window = CreateWindowExW(
+			var lpWindowNameStr = "RawKeyInput";
+			HWND window;
+			fixed (char* lpWindowName = lpWindowNameStr)
+			{
+				window = CreateWindowExW(
 					dwExStyle: 0,
 					lpClassName: _rawInputWindowAtom.Value,
-					lpWindowName: "RawKeyInput",
-					dwStyle: WS_CHILD,
+					lpWindowName: lpWindowName,
+					dwStyle: WINDOW_STYLE.WS_CHILD,
 					X: 0,
 					Y: 0,
 					nWidth: 1,
 					nHeight: 1,
-					hWndParent: HWND_MESSAGE,
-					hMenu: IntPtr.Zero,
-					hInstance: LoaderApiImports.GetModuleHandleW(null),
-					lpParam: IntPtr.Zero);
-
-			if (window == IntPtr.Zero)
+					hWndParent: HWND.HWND_MESSAGE,
+					hMenu: default,
+					hInstance: GetModuleHandleW(default(PCWSTR)),
+					lpParam: default);
+			}
+			if (window.IsNull)
 			{
 				throw new InvalidOperationException("Failed to create RAWINPUT window");
 			}
@@ -280,11 +290,11 @@ namespace BizHawk.Bizware.Input
 		{
 			lock (_lockObj)
 			{
-				if (RawInputWindow != IntPtr.Zero)
+				if (!RawInputWindow.IsNull)
 				{
 					// Can't use DestroyWindow, that's only allowed in the thread that created the window!
-					PostMessageW(RawInputWindow, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-					RawInputWindow = IntPtr.Zero;
+					PostMessageW(RawInputWindow, WM_CLOSE, default, default);
+					RawInputWindow = HWND.Null;
 				}
 				else
 				{
@@ -310,15 +320,20 @@ namespace BizHawk.Bizware.Input
 				{
 					RawInputWindow = CreateRawInputWindow();
 					var handle = GCHandle.Alloc(this, GCHandleType.Normal);
-					SetWindowLongPtrW(RawInputWindow, GWLP_USERDATA, GCHandle.ToIntPtr(handle));
+					SetWindowLongPtrW(RawInputWindow, WINDOW_LONG_PTR_INDEX.GWLP_USERDATA, GCHandle.ToIntPtr(handle));
 				}
 
 				_handleAltKbLayouts = handleAltKbLayouts;
 
-				while (PeekMessageW(out var msg, RawInputWindow, 0, 0, PM_REMOVE))
+				while (PeekMessageW(
+					out var msg,
+					RawInputWindow,
+					wMsgFilterMin: 0,
+					wMsgFilterMax: 0,
+					PEEK_MESSAGE_REMOVE_TYPE.PM_REMOVE))
 				{
-					TranslateMessage(ref msg);
-					DispatchMessageW(ref msg);
+					TranslateMessage(in msg);
+					DispatchMessageW(in msg);
 				}
 
 				var ret = _keyEvents;
@@ -340,13 +355,13 @@ namespace BizHawk.Bizware.Input
 				{
 					RawInputWindow = CreateRawInputWindow();
 					var handle = GCHandle.Alloc(this, GCHandleType.Normal);
-					SetWindowLongPtrW(RawInputWindow, GWLP_USERDATA, GCHandle.ToIntPtr(handle));
+					SetWindowLongPtrW(RawInputWindow, WINDOW_LONG_PTR_INDEX.GWLP_USERDATA, GCHandle.ToIntPtr(handle));
 				}
 
-				while (PeekMessageW(out var msg, RawInputWindow, 0, 0, PM_REMOVE))
+				while (PeekMessageW(out var msg, RawInputWindow, 0, 0, PEEK_MESSAGE_REMOVE_TYPE.PM_REMOVE))
 				{
-					TranslateMessage(ref msg);
-					DispatchMessageW(ref msg);
+					TranslateMessage(in msg);
+					DispatchMessageW(in msg);
 				}
 
 				var ret = _mouseDelta;

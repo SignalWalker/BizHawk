@@ -1,6 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
+using Windows.Win32;
+using Windows.Win32.UI.WindowsAndMessaging;
+
 // ReSharper disable UnusedMember.Local
 
 namespace BizHawk.Common
@@ -250,12 +253,12 @@ namespace BizHawk.Common
 
 		private ref struct TempMenu
 		{
-			public IntPtr Handle { get; private set; }
+			public HMENU Handle { get; private set; }
 
 			public TempMenu()
 			{
 				Handle = Win32Imports.CreatePopupMenu();
-				if (Handle == IntPtr.Zero)
+				if (Handle.IsNull)
 				{
 					throw new InvalidOperationException($"{nameof(Win32Imports.CreatePopupMenu)} returned NULL!");
 				}
@@ -263,10 +266,10 @@ namespace BizHawk.Common
 
 			public void Dispose()
 			{
-				if (Handle != IntPtr.Zero)
+				if (!Handle.IsNull)
 				{
 					_ = Win32Imports.DestroyMenu(Handle);
-					Handle = IntPtr.Zero;
+					Handle = HMENU.Null;
 				}
 			}
 		}
@@ -279,7 +282,13 @@ namespace BizHawk.Common
 			const int CmdFirst = 0x8000;
 			ctxMenu.CMI->QueryContextMenu(menu.Handle, 0, CmdFirst, uint.MaxValue, IContextMenu.CMF.EXPLORE);
 
-			var command = Win32Imports.TrackPopupMenuEx(menu.Handle, Win32Imports.TPM.RETURNCMD, x, y, parentWindow, IntPtr.Zero);
+			var command = Win32Imports.TrackPopupMenuEx(
+				menu.Handle,
+				TPMFLAGS.RETURNCMD,
+				x: x,
+				y: y,
+				new(parentWindow),
+				lptpm: default);
 			if (command > 0)
 			{
 				const int SW_SHOWNORMAL = 1;

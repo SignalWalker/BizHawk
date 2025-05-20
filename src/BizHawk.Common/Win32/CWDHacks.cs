@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 
+using Windows.Win32;
+
 namespace BizHawk.Common
 {
 	/// <summary>Gets/Sets the current working directory while bypassing the security checks triggered by the public API (<see cref="Environment.CurrentDirectory"/>).</summary>

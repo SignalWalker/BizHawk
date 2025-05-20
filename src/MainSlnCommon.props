@@ -23,6 +23,7 @@
 		<AdditionalFiles Include="$(MSBuildThisFileDirectory)/BannedSymbols.BannedApiAnalyzers.txt" />
 		<AdditionalFiles Include="$(MSBuildThisFileDirectory)/Menees.Analyzers.Settings.xml" />
 		<Using Include="System" />
+		<Using Include="Windows.Win32.Win32Imports" Alias="WmImports" />
 	</ItemGroup>
 	<ItemGroup Condition=" '$(Configuration)' != 'Debug' ">
 		<Compile Remove="$(MSBuildProjectDirectory)/debug/**/*" />
